@@ -2,20 +2,23 @@ const r = require('express').Router();
 const pool = require('../db');
 const { h, err, requerir, t } = require('../util');
 const { crearCuenta } = require('../cuentas');
-const { ficha } = require('../servicios');
+const { ficha, COD, ANIO, matricularEstudianteEnSalon } = require('../servicios');
 
 // Lista: el estado de la cuenta se deduce de la tabla usuario
 //   sin fila en usuario -> pendiente | activo=1 -> activo | activo=0 -> inactivo
 r.get('/', h(async (req, res) => {
   const [rows] = await pool.query(
     `SELECT e.id_estudiante, e.documento, e.nombres, e.apellidos, e.fecha_nacimiento, e.estado,
-            s.nombre AS salon, u.correo AS correo_cuenta,
+            s.id_salon, ${COD} AS codigo, s.nombre AS salon, g.nivel,
+            u.correo AS correo_cuenta,
             CASE WHEN u.id_usuario IS NULL THEN 'pendiente' WHEN u.activo = 1 THEN 'activo' ELSE 'inactivo' END AS cuenta
      FROM estudiante e
      LEFT JOIN salon_estudiante se ON se.id_estudiante = e.id_estudiante AND se.estado = 'activo'
+          AND se.id_salon IN (SELECT id_salon FROM salon WHERE anio_lectivo = ${ANIO})
      LEFT JOIN salon s ON s.id_salon = se.id_salon
+     LEFT JOIN grado g ON g.id_grado = s.id_grado
      LEFT JOIN usuario u ON u.id_estudiante = e.id_estudiante
-     ORDER BY e.apellidos, e.nombres`);
+     ORDER BY g.nivel, s.grupo, e.apellidos, e.nombres`);
   res.json(rows);
 }));
 
@@ -53,7 +56,9 @@ r.post('/', h(async (req, res) => {
     await c.query('INSERT INTO salon_estudiante (id_salon, id_estudiante) VALUES (?, ?)', [b.id_salon, e.insertId]);
     return e.insertId;
   });
-  res.status(201).json({ id });
+  // Matrícula automática en todas las materias (cursos) del salón
+  const matriculas = await matricularEstudianteEnSalon(id, b.id_salon);
+  res.status(201).json({ id, matriculas });
 }));
 
 r.put('/:id', h(async (req, res) => {

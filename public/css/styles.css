@@ -126,3 +126,26 @@ label input[readonly]{background:#f1f5f9}
   .barra{grid-template-columns:100px 1fr 60px}
   main{padding:18px 14px}
 }
+
+/* ---------- Organización por grado / salón ---------- */
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px}
+.tabs button{border:1px solid var(--bd);background:#fff;border-radius:999px;padding:7px 14px;cursor:pointer;font-weight:600;color:var(--tx)}
+.tabs button span{background:#eef2fa;border-radius:999px;padding:1px 8px;font-size:12px;margin-left:4px;color:var(--mu)}
+.tabs button.on{background:var(--azul);border-color:var(--azul);color:#fff}
+.tabs button.on span{background:rgba(255,255,255,.25);color:#fff}
+.tabs.sub button{font-size:13px;padding:5px 12px;background:#f8fafc}
+.tabs.sub button.on{background:var(--verde);border-color:var(--verde);color:#fff}
+.grupo{margin-top:18px;border:1px solid var(--bd);border-radius:12px;padding:14px 16px}
+.grupo-h{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+.grupo-h h3{display:flex;align-items:baseline;gap:10px}
+.grupo-h small{font-size:13px;font-weight:400;color:var(--mu)}
+.fila-grado{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center;padding:6px 0;border-bottom:1px solid var(--bd)}
+.fila-grado>b{min-width:90px;color:var(--osc)}
+label.check{flex-direction:row;align-items:center;gap:6px;font-size:14px;color:var(--tx)}
+label.check input{width:auto;padding:0}
+.tools select{max-width:260px}
+
+/* ---------- Casillas de notas ---------- */
+.nota{width:70px;text-align:center;border:1px solid var(--bd);border-radius:8px;padding:7px 4px;background:#fff;color:var(--tx)}
+.nota:focus{border-color:var(--azul)}
+.nota.bad{color:var(--rojo);border-color:#fca5a5}

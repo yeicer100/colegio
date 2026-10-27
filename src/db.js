@@ -2,16 +2,19 @@
 require('dotenv').config();
 const mysql = require('mysql2/promise');
 
+
 const pool = mysql.createPool({
   host: process.env.DB_HOST || 'localhost',
+  port: Number(process.env.DB_PORT) || 3307,
   user: process.env.DB_USER || 'colegio_web',
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME || 'colegio',
   waitForConnections: true,
   connectionLimit: 10,
-  dateStrings: true,      // las fechas llegan como texto 'YYYY-MM-DD'
-  decimalNumbers: true    // los DECIMAL llegan como números
+  dateStrings: true,
+  decimalNumbers: true
 });
+
 
 // Ejecuta varias consultas como una sola transacción (todo o nada)
 async function tx(fn) {

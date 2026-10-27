@@ -2,7 +2,7 @@
 const r = require('express').Router();
 const pool = require('../db');
 const { h, err, requerir, t } = require('../util');
-const { listarCursos } = require('../servicios');
+const { COD, listarCursos, matricularSalonEnCurso } = require('../servicios');
 
 // Listas para llenar los <select> de los formularios
 r.get('/catalogos', h(async (req, res) => {
@@ -13,7 +13,7 @@ r.get('/catalogos', h(async (req, res) => {
     docentes: await q("SELECT id_docente, CONCAT(nombres,' ',apellidos) AS nombre FROM docente ORDER BY apellidos, nombres"),
     asignaturas: await q('SELECT id_asignatura, nombre FROM asignatura ORDER BY nombre'),
     periodos: await q('SELECT id_periodo, nombre FROM periodo_academico ORDER BY fecha_inicio DESC'),
-    salones: await q('SELECT id_salon, nombre, anio_lectivo FROM salon ORDER BY anio_lectivo DESC, nombre')
+    salones: await q(`SELECT s.id_salon, s.nombre, s.anio_lectivo, g.nivel, ${COD} AS codigo FROM salon s JOIN grado g ON g.id_grado = s.id_grado ORDER BY s.anio_lectivo DESC, g.nivel, s.grupo`)
   });
 }));
 
@@ -21,9 +21,12 @@ r.get('/catalogos', h(async (req, res) => {
 r.get('/salones', h(async (req, res) => {
   const [rows] = await pool.query(
     `SELECT s.id_salon, s.nombre, s.grupo, s.anio_lectivo, s.cupo_maximo, s.id_sede, s.id_grado, s.id_director_grupo,
+            g.nivel, ${COD} AS codigo,
             v.grado, v.sede, v.director_grupo, v.total_estudiantes, v.cupos_disponibles
-     FROM salon s JOIN vista_salon_resumen v ON v.id_salon = s.id_salon
-     ORDER BY s.anio_lectivo DESC, s.id_grado, s.grupo`);
+     FROM salon s
+     JOIN grado g ON g.id_grado = s.id_grado
+     JOIN vista_salon_resumen v ON v.id_salon = s.id_salon
+     ORDER BY s.anio_lectivo DESC, g.nivel, s.grupo`);
   res.json(rows);
 }));
 
@@ -92,7 +95,8 @@ r.post('/cursos', h(async (req, res) => {
     `INSERT INTO curso (id_asignatura, id_docente, id_periodo_academico, id_salon, aula, cupo_maximo)
      VALUES (?,?,?,?,?,?)`,
     [b.id_asignatura, b.id_docente, b.id_periodo_academico, b.id_salon, t(b.aula), b.cupo_maximo || 30]);
-  res.status(201).json({ id: x.insertId });
+  const matriculados = await matricularSalonEnCurso(x.insertId);   // matrícula automática
+  res.status(201).json({ id: x.insertId, matriculados });
 }));
 
 r.put('/cursos/:id', h(async (req, res) => {

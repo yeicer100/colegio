@@ -5,6 +5,9 @@ const pool = require('../db');
 const { h, err, requerir } = require('../util');
 const { listarCursos } = require('../servicios');
 
+// Máximo de notas por estudiante en cada materia y período (se cambia en .env)
+const MAX_NOTAS = Number(process.env.MAX_NOTAS) || 5;
+
 async function permitirCurso(user, idCurso) {
   const [[c]] = await pool.query('SELECT id_docente FROM curso WHERE id_curso = ?', [idCurso]);
   if (!c) throw err(404, 'Curso no encontrado');
@@ -19,6 +22,12 @@ r.get('/cursos', h(async (req, res) => {
 }));
 
 // ---------- CALIFICACIONES ----------
+// Cada estudiante tiene MAX_NOTAS casillas (Nota 1 ... Nota 5). No hay porcentajes en la pantalla:
+// la nota definitiva es el promedio de las notas escritas. (La columna "porcentaje" de la BD es
+// obligatoria, así que se guarda 100 / MAX_NOTAS en cada nota: el promedio ponderado de la vista
+// vista_boletin queda igual a un promedio simple.)
+const PCT = Math.floor(10000 / MAX_NOTAS) / 100;
+
 r.get('/cursos/:id/notas', h(async (req, res) => {
   const id = req.params.id;
   await permitirCurso(req.user, id);
@@ -27,66 +36,66 @@ r.get('/cursos/:id/notas', h(async (req, res) => {
      FROM matricula m JOIN estudiante e ON e.id_estudiante = m.id_estudiante
      WHERE m.id_curso = ? AND m.estado = 'activa' ORDER BY e.apellidos, e.nombres`, [id]);
   const [notas] = await pool.query(
-    `SELECT c.id_nota, c.id_matricula, c.descripcion_evaluacion, c.porcentaje, c.calificacion, c.fecha
+    `SELECT c.id_nota, c.id_matricula, c.descripcion_evaluacion, c.calificacion
      FROM calificacion c JOIN matricula m ON m.id_matricula = c.id_matricula
      WHERE m.id_curso = ? ORDER BY c.fecha, c.id_nota`, [id]);
-  // La nota definitiva ponderada la calcula la vista vista_boletin
-  const [bol] = await pool.query(
-    'SELECT id_estudiante, porcentaje_evaluado, nota_definitiva FROM vista_boletin WHERE id_curso = ?', [id]);
+  // La nota definitiva la calcula la vista vista_boletin
+  const [bol] = await pool.query('SELECT id_estudiante, nota_definitiva FROM vista_boletin WHERE id_curso = ?', [id]);
 
-  res.json(est.map(e => ({
-    ...e,
-    notas: notas.filter(n => n.id_matricula === e.id_matricula),
-    ...(bol.find(b => b.id_estudiante === e.id_estudiante) || { porcentaje_evaluado: 0, nota_definitiva: null })
-  })));
+  res.json(est.map(e => {
+    const slots = Array(MAX_NOTAS).fill(null);
+    const propias = notas.filter(n => n.id_matricula === e.id_matricula);
+    const sinLugar = [];
+    for (const n of propias) {                       // "Nota 3" va en la casilla 3
+      const m = /^Nota (\d+)$/.exec(n.descripcion_evaluacion), k = m ? Number(m[1]) - 1 : -1;
+      if (k >= 0 && k < MAX_NOTAS && !slots[k]) slots[k] = { id_nota: n.id_nota, valor: n.calificacion };
+      else sinLugar.push(n);
+    }
+    for (const n of sinLugar) {                      // notas con otro nombre ocupan casillas libres
+      const k = slots.indexOf(null);
+      if (k >= 0) slots[k] = { id_nota: n.id_nota, valor: n.calificacion };
+    }
+    const b = bol.find(x => x.id_estudiante === e.id_estudiante);
+    return { ...e, slots, max_notas: MAX_NOTAS, nota_definitiva: b ? b.nota_definitiva : null };
+  }));
 }));
 
-function validarNota(b) {
-  requerir(b, 'descripcion_evaluacion', 'porcentaje', 'calificacion', 'fecha');
-  if (b.porcentaje <= 0 || b.porcentaje > 100) throw err(400, 'El porcentaje debe estar entre 1 y 100');
-  if (b.calificacion < 0 || b.calificacion > 5) throw err(400, 'La calificación debe estar entre 0.0 y 5.0');
-}
+// Guarda todas las casillas de un curso de una vez
+r.put('/cursos/:id/notas', h(async (req, res) => {
+  const id = req.params.id;
+  await permitirCurso(req.user, id);
+  if (!Array.isArray(req.body.notas)) throw err(400, 'Datos no válidos');
+  const [mats] = await pool.query("SELECT id_matricula FROM matricula WHERE id_curso = ? AND estado = 'activa'", [id]);
+  const validas = new Set(mats.map(m => m.id_matricula));
 
-r.post('/notas', h(async (req, res) => {
-  const b = req.body;
-  requerir(b, 'id_matricula');
-  validarNota(b);
-  const [[m]] = await pool.query('SELECT id_curso FROM matricula WHERE id_matricula = ?', [b.id_matricula]);
-  if (!m) throw err(404, 'Matrícula no encontrada');
-  await permitirCurso(req.user, m.id_curso);
-  // Procedimiento transaccional: valida que los porcentajes no pasen de 100
-  await pool.query('CALL sp_registrar_calificacion_tx(?,?,?,?,?)',
-    [b.id_matricula, b.descripcion_evaluacion.trim(), b.porcentaje, b.calificacion, b.fecha]);
-  res.status(201).json({ ok: true });
-}));
-
-async function notaDe(id) {
-  const [[n]] = await pool.query(
-    `SELECT c.id_matricula, m.id_curso FROM calificacion c JOIN matricula m ON m.id_matricula = c.id_matricula
-     WHERE c.id_nota = ?`, [id]);
-  if (!n) throw err(404, 'Nota no encontrada');
-  return n;
-}
-
-r.put('/notas/:id', h(async (req, res) => {
-  const b = req.body, id = req.params.id;
-  validarNota(b);
-  const n = await notaDe(id);
-  await permitirCurso(req.user, n.id_curso);
-  const [[s]] = await pool.query(
-    'SELECT COALESCE(SUM(porcentaje),0) AS suma FROM calificacion WHERE id_matricula = ? AND id_nota <> ?',
-    [n.id_matricula, id]);
-  if (s.suma + Number(b.porcentaje) > 100) throw err(400, 'La suma de porcentajes supera el 100% para esta matricula');
-  await pool.query(
-    'UPDATE calificacion SET descripcion_evaluacion=?, porcentaje=?, calificacion=?, fecha=? WHERE id_nota=?',
-    [b.descripcion_evaluacion.trim(), b.porcentaje, b.calificacion, b.fecha, id]);
-  res.json({ ok: true });
-}));
-
-r.delete('/notas/:id', h(async (req, res) => {
-  const n = await notaDe(req.params.id);
-  await permitirCurso(req.user, n.id_curso);
-  await pool.query('DELETE FROM calificacion WHERE id_nota = ?', [req.params.id]);
+  await pool.tx(async c => {
+    for (const est of req.body.notas) {
+      if (!validas.has(est.id_matricula) || !Array.isArray(est.slots) || est.slots.length > MAX_NOTAS) throw err(400, 'Datos no válidos');
+      for (let k = 0; k < est.slots.length; k++) {
+        const { id_nota, valor } = est.slots[k];
+        const vacio = valor === '' || valor === null || valor === undefined;
+        if (id_nota) {
+          const [[n]] = await c.query('SELECT id_nota FROM calificacion WHERE id_nota = ? AND id_matricula = ?', [id_nota, est.id_matricula]);
+          if (!n) throw err(400, 'Datos no válidos');
+        }
+        if (vacio) {
+          if (id_nota) await c.query('DELETE FROM calificacion WHERE id_nota = ?', [id_nota]);
+          continue;
+        }
+        const v = Math.round(Number(valor) * 10) / 10;
+        if (Number.isNaN(v) || v < 0 || v > 5) throw err(400, 'Las notas deben estar entre 0.0 y 5.0');
+        if (id_nota) {
+          await c.query('UPDATE calificacion SET descripcion_evaluacion=?, porcentaje=?, calificacion=? WHERE id_nota=?',
+            [`Nota ${k + 1}`, PCT, v, id_nota]);
+        } else {
+          // el trigger trg_validar_calificacion revisa el rango 0.0 a 5.0
+          await c.query(
+            'INSERT INTO calificacion (id_matricula, descripcion_evaluacion, porcentaje, calificacion, fecha) VALUES (?,?,?,?,CURDATE())',
+            [est.id_matricula, `Nota ${k + 1}`, PCT, v]);
+        }
+      }
+    }
+  });
   res.json({ ok: true });
 }));
 

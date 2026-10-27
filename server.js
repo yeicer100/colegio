@@ -17,7 +17,6 @@ app.use('/api/dashboard',   auth, rol('admin'), require('./src/routes/dashboard.
 app.use('/api/estudiantes', auth, rol('admin'), require('./src/routes/estudiantes.routes'));
 app.use('/api/docentes',    auth, rol('admin'), require('./src/routes/docentes.routes'));
 app.use('/api/usuarios',    auth, rol('admin'), require('./src/routes/usuarios.routes'));
-app.use('/api/matriculas',  auth, rol('admin'), require('./src/routes/matriculas.routes'));
 
 // ADMINISTRADOR y DOCENTE (el docente solo ve sus cursos)
 app.use('/api/docencia', auth, rol('admin', 'docente'), require('./src/routes/docencia.routes'));
